@@ -117,7 +117,7 @@ func setPlayState(bridgeIpAddress string, username string, mpdIpAddress string, 
 	}
 }
 
-func initMpd(mpdIpAddress string, playlist string) error {
+func initMpd(mpdIpAddress string, playlist string, volume string) error {
 	err := runMpcCmd(mpdIpAddress, "clear")
 	if err != nil {
 		return errors.New("Could not clear playlist")
@@ -130,7 +130,7 @@ func initMpd(mpdIpAddress string, playlist string) error {
 	if err != nil {
 		return errors.New("Could not set repeat")
 	}
-	err = runMpcCmd(mpdIpAddress, "volume", "15")
+	err = runMpcCmd(mpdIpAddress, "volume", volume)
 	if err != nil {
 		return errors.New("Could not set volume")
 	}
@@ -162,8 +162,12 @@ func main() {
 	if err != nil {
 		log.Fatalln(fmt.Sprintf("This is not an int: %s, %v", getEnv("SLEEP_AFTER_AWAY", "30"), err))
 	}
+	volume := getEnv("VOLUME", "15")
+	if strconv.Atoi(volume); err != nil {
+		log.Fatalln(fmt.Sprintf("This is not an int: %s, %v", volume, err))
+	}
 
-	initMpd(mpdIpAddress, playlist)
+	initMpd(mpdIpAddress, playlist, volume)
 	setPlayState(bridgeIpAddress, username, mpdIpAddress, graceTime)
 
 	go func() {
