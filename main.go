@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -16,15 +17,9 @@ import (
 
 var playing = false
 
-// BridgeIPResponse is the response received from the Hue bridge API re: the IP of the bridge
-type BridgeIPResponse struct {
-	ID                string `json:"id"`
-	InternalIPAddress string `json:"internalipaddress"`
-}
-
-// SensorDataResponseState is the response received from the Hue bridge API re: the presence recorded by the sensor
+// SensorDataResponseState is the response received from the Hue bridge API re: the light level recorded by the sensor
 type SensorDataResponseState struct {
-	Presence bool `json:"presence"`
+	LightLevel int `json:"lightlevel"`
 }
 
 // SensorDataResponse is the response received from the Hue bridge API re: state of the sensor
@@ -37,7 +32,12 @@ func httpGet(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer response.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+
+		}
+	}(response.Body)
 
 	body, err := ioutil.ReadAll(response.Body)
 	if err != nil {
@@ -46,28 +46,17 @@ func httpGet(url string) (string, error) {
 	return string(body), nil
 }
 
-func getBridgeAddress() (string, error) {
-	body, err := httpGet("https://discovery.meethue.com/")
+func getSensorLightLevel(bridgeIPAddress string, username string) (int, error) {
+	body, err := httpGet("http://" + bridgeIPAddress + "/api/" + username + "/sensors/5")
 	if err != nil {
-		return "", err
-	}
-	var res []BridgeIPResponse
-	json.Unmarshal([]byte(body), &res)
-	if len(res) != 1 {
-		return "", errors.New("Could not determine bridge IP, response length != 1")
-	}
-
-	return res[0].InternalIPAddress, nil
-}
-
-func getSensorPresence(bridgeIPAddress string, username string) (bool, error) {
-	body, err := httpGet("http://" + bridgeIPAddress + "/api/" + username + "/sensors/4")
-	if err != nil {
-		return false, err
+		return -1, err
 	}
 	var res SensorDataResponse
-	json.Unmarshal([]byte(body), &res)
-	return res.State.Presence, nil
+	err = json.Unmarshal([]byte(body), &res)
+	if err != nil {
+		return -1, err
+	}
+	return res.State.LightLevel, nil
 }
 
 func runMpcCmd(mpdIPAddress string, arg ...string) error {
@@ -85,64 +74,72 @@ func pause(mpdIPAddress string) error {
 	return runMpcCmd(mpdIPAddress, "pause")
 }
 
-func play(mpdIPAddress string, arg ...string) error {
+func play(mpdIPAddress string) error {
 	return runMpcCmd(mpdIPAddress, "play")
 }
 
-func schedule(what func(), delay time.Duration) chan bool {
-	stop := make(chan bool)
-
-	go func() {
-		for {
-			what()
-			select {
-			case <-time.After(delay):
-			case <-stop:
-				return
-			}
-		}
-	}()
-
-	return stop
-}
-
-func setPlayState(bridgeIPAddress string, username string, mpdIPAddress string, graceTime int) {
-	presence, err := getSensorPresence(bridgeIPAddress, username)
+func setPlayState(bridgeIPAddress string, username string, mpdIPAddress string, dayStart time.Time, dayEnd time.Time) {
+	lightLevel, err := getSensorLightLevel(bridgeIPAddress, username)
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
-	if presence && !playing {
-		play(mpdIPAddress)
+	shouldTurnOn := shouldTurnOn(lightLevel, dayStart, dayEnd)
+
+	if shouldTurnOn && !playing {
+		err := play(mpdIPAddress)
+		if err != nil {
+			return
+		}
 		playing = true
-		time.Sleep(time.Duration(graceTime) * time.Second)
-	} else if !presence && playing {
-		pause(mpdIPAddress)
+	} else if !shouldTurnOn && playing {
+		err := pause(mpdIPAddress)
+		if err != nil {
+			return
+		}
 		playing = false
 	}
+}
+
+func shouldTurnOn(lightLevel int, dayStart time.Time, dayEnd time.Time) bool {
+	on := false
+	if lightLevel > 1000 {
+		on = true
+	}
+
+	loc, _ := time.LoadLocation("Europe/Amsterdam")
+	now := time.Now().In(loc)
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), dayStart.Hour(), dayStart.Minute(), 0, 0, loc)
+	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), dayEnd.Hour(), dayEnd.Minute(), 0, 0, loc)
+
+	if startOfDay.After(now) || endOfDay.Before(now) {
+		on = false
+	}
+
+	return on
 }
 
 func initMpd(mpdIPAddress string, playlist string, volume string) error {
 	err := runMpcCmd(mpdIPAddress, "clear")
 	if err != nil {
-		return errors.New("Could not clear playlist")
+		return errors.New("could not clear playlist")
 	}
 	err = runMpcCmd(mpdIPAddress, "load", playlist)
 	if err != nil {
-		return fmt.Errorf("Could not load playlist %s :(((", playlist)
+		return fmt.Errorf("could not load playlist %s :(((", playlist)
 	}
 	err = runMpcCmd(mpdIPAddress, "repeat")
 	if err != nil {
-		return errors.New("Could not set repeat")
+		return errors.New("could not set repeat")
 	}
 	err = runMpcCmd(mpdIPAddress, "random")
 	if err != nil {
-		return errors.New("Could not set random")
+		return errors.New("could not set random")
 	}
 	err = runMpcCmd(mpdIPAddress, "volume", volume)
 	if err != nil {
-		return errors.New("Could not set volume")
+		return errors.New("could not set volume")
 	}
 	return nil
 }
@@ -158,8 +155,7 @@ func getEnvOrDie(key string) string {
 	if value, ok := os.LookupEnv(key); ok {
 		return value
 	}
-	log.Fatalln(fmt.Sprintf("Could not find env var %s. Quitting.", key))
-	os.Exit(1)
+	log.Fatalln(fmt.Sprintf("could not find env var %s. Quitting.", key))
 	return ""
 }
 
@@ -168,17 +164,32 @@ func main() {
 	mpdIPAddress := getEnvOrDie("MPD_IP")
 	username := getEnvOrDie("HUE_USERNAME")
 	playlist := getEnvOrDie("PLAYLIST")
-	graceTime, err := strconv.Atoi(getEnv("SLEEP_AFTER_AWAY", "30"))
+	dayStartEnv := getEnvOrDie("DAY_START")
+	dayEndEnv := getEnvOrDie("DAY_END")
+
+	loc, _ := time.LoadLocation("Europe/Amsterdam")
+
+	dayStart, err := time.ParseInLocation("15:04", dayStartEnv, loc)
 	if err != nil {
-		log.Fatalln(fmt.Sprintf("This is not an int: %s, %v", getEnv("SLEEP_AFTER_AWAY", "30"), err))
-	}
-	volume := getEnv("VOLUME", "5")
-	if strconv.Atoi(volume); err != nil {
-		log.Fatalln(fmt.Sprintf("This is not an int: %s, %v", volume, err))
+		log.Fatalln(fmt.Sprintf("DAY_START is not a time: %s, %v", dayStartEnv, err))
 	}
 
-	initMpd(mpdIPAddress, playlist, volume)
-	setPlayState(bridgeIPAddress, username, mpdIPAddress, graceTime)
+	dayEnd, _ := time.ParseInLocation("15:04", dayEndEnv, loc)
+	if err != nil {
+		log.Fatalln(fmt.Sprintf("DAY_END is not a time: %s, %v", dayEndEnv, err))
+	}
+
+	volume := getEnv("VOLUME", "3")
+	_, err = strconv.Atoi(volume)
+	if err != nil {
+		log.Fatalln(fmt.Sprintf("VOLUME is not an int: %s, %v", volume, err))
+	}
+
+	err = initMpd(mpdIPAddress, playlist, volume)
+	if err != nil {
+		return
+	}
+	setPlayState(bridgeIPAddress, username, mpdIPAddress, dayStart, dayEnd)
 
 	go func() {
 		sigchan := make(chan os.Signal, 10)
@@ -186,12 +197,15 @@ func main() {
 		<-sigchan
 		log.Println("Program killed!")
 
-		pause(mpdIPAddress)
+		err := pause(mpdIPAddress)
+		if err != nil {
+			return
+		}
 
 		os.Exit(0)
 	}()
 
-	ticker := time.NewTicker(1500 * time.Millisecond)
+	ticker := time.NewTicker(2 * time.Second)
 	done := make(chan bool)
 	go func() {
 		for {
@@ -199,7 +213,7 @@ func main() {
 			case <-done:
 				return
 			case _ = <-ticker.C:
-				setPlayState(bridgeIPAddress, username, mpdIPAddress, graceTime)
+				setPlayState(bridgeIPAddress, username, mpdIPAddress, dayStart, dayEnd)
 			}
 		}
 	}()
