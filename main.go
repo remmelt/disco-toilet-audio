@@ -78,14 +78,14 @@ func play(mpdIPAddress string) error {
 	return runMpcCmd(mpdIPAddress, "play")
 }
 
-func setPlayState(bridgeIPAddress string, username string, mpdIPAddress string, dayStart time.Time, dayEnd time.Time) {
+func setPlayState(bridgeIPAddress string, username string, mpdIPAddress string, dayStart time.Time, dayEnd time.Time, loc *time.Location) {
 	lightLevel, err := getSensorLightLevel(bridgeIPAddress, username)
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
-	shouldTurnOn := shouldTurnOn(lightLevel, dayStart, dayEnd)
+	shouldTurnOn := shouldTurnOn(lightLevel, dayStart, dayEnd, loc)
 
 	if shouldTurnOn && !playing {
 		err := play(mpdIPAddress)
@@ -102,13 +102,12 @@ func setPlayState(bridgeIPAddress string, username string, mpdIPAddress string, 
 	}
 }
 
-func shouldTurnOn(lightLevel int, dayStart time.Time, dayEnd time.Time) bool {
+func shouldTurnOn(lightLevel int, dayStart time.Time, dayEnd time.Time, loc *time.Location) bool {
 	on := false
 	if lightLevel > 1000 {
 		on = true
 	}
 
-	loc, _ := time.LoadLocation("Europe/Amsterdam")
 	now := time.Now().In(loc)
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), dayStart.Hour(), dayStart.Minute(), 0, 0, loc)
 	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), dayEnd.Hour(), dayEnd.Minute(), 0, 0, loc)
@@ -155,7 +154,7 @@ func getEnvOrDie(key string) string {
 	if value, ok := os.LookupEnv(key); ok {
 		return value
 	}
-	log.Fatalln(fmt.Sprintf("could not find env var %s. Quitting.", key))
+	log.Fatalln(fmt.Sprintf("could not find env var %s", key))
 	return ""
 }
 
@@ -167,7 +166,10 @@ func main() {
 	dayStartEnv := getEnvOrDie("DAY_START")
 	dayEndEnv := getEnvOrDie("DAY_END")
 
-	loc, _ := time.LoadLocation("Europe/Amsterdam")
+	loc, err := time.LoadLocation("Europe/Amsterdam")
+	if err != nil {
+		log.Fatalln(fmt.Sprintf("Could not parse location, %v", err))
+	}
 
 	dayStart, err := time.ParseInLocation("15:04", dayStartEnv, loc)
 	if err != nil {
@@ -179,7 +181,7 @@ func main() {
 		log.Fatalln(fmt.Sprintf("DAY_END is not a time: %s, %v", dayEndEnv, err))
 	}
 
-	volume := getEnv("VOLUME", "3")
+	volume := getEnv("VOLUME", "2")
 	_, err = strconv.Atoi(volume)
 	if err != nil {
 		log.Fatalln(fmt.Sprintf("VOLUME is not an int: %s, %v", volume, err))
@@ -189,7 +191,7 @@ func main() {
 	if err != nil {
 		return
 	}
-	setPlayState(bridgeIPAddress, username, mpdIPAddress, dayStart, dayEnd)
+	setPlayState(bridgeIPAddress, username, mpdIPAddress, dayStart, dayEnd, loc)
 
 	go func() {
 		sigchan := make(chan os.Signal, 10)
@@ -213,7 +215,7 @@ func main() {
 			case <-done:
 				return
 			case _ = <-ticker.C:
-				setPlayState(bridgeIPAddress, username, mpdIPAddress, dayStart, dayEnd)
+				setPlayState(bridgeIPAddress, username, mpdIPAddress, dayStart, dayEnd, loc)
 			}
 		}
 	}()
