@@ -78,7 +78,7 @@ func play(mpdIPAddress string) error {
 	return runMpcCmd(mpdIPAddress, "play")
 }
 
-func setPlayState(bridgeIPAddress string, username string, mpdIPAddress string, dayStart time.Time, dayEnd time.Time, loc *time.Location) {
+func setPlayState(bridgeIPAddress string, username string, mpdIPAddress string, dayStart time.Time, dayEnd time.Time, loc *time.Location, volume string) {
 	lightLevel, err := getSensorLightLevel(bridgeIPAddress, username)
 	if err != nil {
 		log.Println(err)
@@ -88,7 +88,11 @@ func setPlayState(bridgeIPAddress string, username string, mpdIPAddress string, 
 	shouldTurnOn := shouldTurnOn(lightLevel, dayStart, dayEnd, loc)
 
 	if shouldTurnOn && !playing {
-		err := play(mpdIPAddress)
+		err = runMpcCmd(mpdIPAddress, "volume", volume)
+		if err != nil {
+			return
+		}
+		err = play(mpdIPAddress)
 		if err != nil {
 			return
 		}
@@ -191,7 +195,7 @@ func main() {
 	if err != nil {
 		return
 	}
-	setPlayState(bridgeIPAddress, username, mpdIPAddress, dayStart, dayEnd, loc)
+	setPlayState(bridgeIPAddress, username, mpdIPAddress, dayStart, dayEnd, loc, volume)
 
 	go func() {
 		sigchan := make(chan os.Signal, 10)
@@ -215,7 +219,7 @@ func main() {
 			case <-done:
 				return
 			case _ = <-ticker.C:
-				setPlayState(bridgeIPAddress, username, mpdIPAddress, dayStart, dayEnd, loc)
+				setPlayState(bridgeIPAddress, username, mpdIPAddress, dayStart, dayEnd, loc, volume)
 			}
 		}
 	}()
