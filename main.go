@@ -111,28 +111,25 @@ func shouldTurnOn(lightLevel int, dayStart time.Time, dayEnd time.Time, loc *tim
 	if lightLevel > 1000 {
 		on = true
 	}
+	msg := fmt.Sprintf("found lightLevel: %d", lightLevel)
 
-	now := time.Now().In(loc)
-	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), dayStart.Hour(), dayStart.Minute(), 0, 0, loc)
-	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), dayEnd.Hour(), dayEnd.Minute(), 0, 0, loc)
+	if on {
+		now := time.Now().In(loc)
+		startOfDay := time.Date(now.Year(), now.Month(), now.Day(), dayStart.Hour(), dayStart.Minute(), 0, 0, loc)
+		endOfDay := time.Date(now.Year(), now.Month(), now.Day(), dayEnd.Hour(), dayEnd.Minute(), 0, 0, loc)
 
-	if startOfDay.After(now) || endOfDay.Before(now) {
-		on = false
+		if startOfDay.After(now) || endOfDay.Before(now) {
+			on = false
+			msg += fmt.Sprintf(" but not playing because %s not within range", now)
+		}
+		log.Println(msg)
 	}
 
 	return on
 }
 
-func initMpd(mpdIPAddress string, playlist string, volume string) error {
-	err := runMpcCmd(mpdIPAddress, "clear")
-	if err != nil {
-		return errors.New("could not clear playlist")
-	}
-	err = runMpcCmd(mpdIPAddress, "load", playlist)
-	if err != nil {
-		return fmt.Errorf("could not load playlist %s :(((", playlist)
-	}
-	err = runMpcCmd(mpdIPAddress, "repeat")
+func initMpd(mpdIPAddress string, volume string) error {
+	err := runMpcCmd(mpdIPAddress, "repeat")
 	if err != nil {
 		return errors.New("could not set repeat")
 	}
@@ -163,16 +160,17 @@ func getEnvOrDie(key string) string {
 }
 
 func main() {
+	log.Println("starting disco toilet")
+
 	bridgeIPAddress := getEnvOrDie("HUE_BRIDGE_IP")
 	mpdIPAddress := getEnvOrDie("MPD_IP")
 	username := getEnvOrDie("HUE_USERNAME")
-	playlist := getEnvOrDie("PLAYLIST")
 	dayStartEnv := getEnvOrDie("DAY_START")
 	dayEndEnv := getEnvOrDie("DAY_END")
 
 	loc, err := time.LoadLocation("Europe/Amsterdam")
 	if err != nil {
-		log.Fatalln(fmt.Sprintf("Could not parse location, %v", err))
+		log.Fatalln(fmt.Sprintf("could not parse location, %v", err))
 	}
 
 	dayStart, err := time.ParseInLocation("15:04", dayStartEnv, loc)
@@ -191,7 +189,7 @@ func main() {
 		log.Fatalln(fmt.Sprintf("VOLUME is not an int: %s, %v", volume, err))
 	}
 
-	err = initMpd(mpdIPAddress, playlist, volume)
+	err = initMpd(mpdIPAddress, volume)
 	if err != nil {
 		return
 	}
@@ -201,7 +199,7 @@ func main() {
 		sigchan := make(chan os.Signal, 10)
 		signal.Notify(sigchan, os.Interrupt)
 		<-sigchan
-		log.Println("Program killed!")
+		log.Println("program killed")
 
 		err := pause(mpdIPAddress)
 		if err != nil {
