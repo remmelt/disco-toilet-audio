@@ -70,8 +70,8 @@ func runMpcCmd(mpdIPAddress string, arg ...string) error {
 	return nil
 }
 
-func pause(mpdIPAddress string) error {
-	return runMpcCmd(mpdIPAddress, "pause")
+func stop(mpdIPAddress string) error {
+	return runMpcCmd(mpdIPAddress, "stop")
 }
 
 func play(mpdIPAddress string) error {
@@ -92,13 +92,17 @@ func setPlayState(bridgeIPAddress string, username string, mpdIPAddress string, 
 		if err != nil {
 			return
 		}
+		err = runMpcCmd(mpdIPAddress, "next", volume)
+		if err != nil {
+			return
+		}
 		err = play(mpdIPAddress)
 		if err != nil {
 			return
 		}
 		playing = true
 	} else if !shouldTurnOn && playing {
-		err := pause(mpdIPAddress)
+		err := stop(mpdIPAddress)
 		if err != nil {
 			return
 		}
@@ -160,7 +164,7 @@ func getEnvOrDie(key string) string {
 }
 
 func main() {
-	log.Println("starting disco toilet")
+	log.Println("starting disco toilet (stop version/tidal)")
 
 	bridgeIPAddress := getEnvOrDie("HUE_BRIDGE_IP")
 	mpdIPAddress := getEnvOrDie("MPD_IP")
@@ -201,7 +205,7 @@ func main() {
 		<-sigchan
 		log.Println("program killed")
 
-		err := pause(mpdIPAddress)
+		err := stop(mpdIPAddress)
 		if err != nil {
 			return
 		}
