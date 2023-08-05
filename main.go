@@ -5,14 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strconv"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 var playing = false
@@ -35,11 +35,11 @@ func httpGet(url string) (string, error) {
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-
+			log.Error("could not close body returned from http get")
 		}
 	}(response.Body)
 
-	body, err := ioutil.ReadAll(response.Body)
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return "", err
 	}
@@ -78,36 +78,37 @@ func play(mpdIPAddress string) error {
 	return runMpcCmd(mpdIPAddress, "play")
 }
 
-func setPlayState(bridgeIPAddress string, username string, mpdIPAddress string, dayStart time.Time, dayEnd time.Time, loc *time.Location, volume string) {
+func setPlayState(
+	bridgeIPAddress string, username string, mpdIPAddress string, dayStart time.Time, dayEnd time.Time,
+	loc *time.Location, volume string,
+) error {
 	lightLevel, err := getSensorLightLevel(bridgeIPAddress, username)
 	if err != nil {
-		log.Println(err)
-		return
+		return err
 	}
 
-	shouldTurnOn := shouldTurnOn(lightLevel, dayStart, dayEnd, loc)
+	turnOn := shouldTurnOn(lightLevel, dayStart, dayEnd, loc)
 
-	if shouldTurnOn && !playing {
-		err = runMpcCmd(mpdIPAddress, "volume", volume)
-		if err != nil {
-			return
+	if turnOn && !playing {
+		log.Info("should turn on and not playing")
+		log.WithField("volume", volume).Info("setting volume")
+		if err = runMpcCmd(mpdIPAddress, "volume", volume); err != nil {
+			return err
 		}
-		err = runMpcCmd(mpdIPAddress, "next", volume)
-		if err != nil {
-			return
+		if err = runMpcCmd(mpdIPAddress, "next"); err != nil {
+			return err
 		}
-		err = play(mpdIPAddress)
-		if err != nil {
-			return
+		if err = play(mpdIPAddress); err != nil {
+			return err
 		}
 		playing = true
-	} else if !shouldTurnOn && playing {
-		err := stop(mpdIPAddress)
-		if err != nil {
-			return
+	} else if !turnOn && playing {
+		if err := stop(mpdIPAddress); err != nil {
+			return err
 		}
 		playing = false
 	}
+	return nil
 }
 
 func shouldTurnOn(lightLevel int, dayStart time.Time, dayEnd time.Time, loc *time.Location) bool {
@@ -193,11 +194,12 @@ func main() {
 		log.Fatalln(fmt.Sprintf("VOLUME is not an int: %s, %v", volume, err))
 	}
 
-	err = initMpd(mpdIPAddress, volume)
-	if err != nil {
-		return
+	if err = initMpd(mpdIPAddress, volume); err != nil {
+		log.Fatalln("could not init mpd", err)
 	}
-	setPlayState(bridgeIPAddress, username, mpdIPAddress, dayStart, dayEnd, loc, volume)
+	if err = setPlayState(bridgeIPAddress, username, mpdIPAddress, dayStart, dayEnd, loc, volume); err != nil {
+		log.Fatalln("could not set initial play state", err)
+	}
 
 	go func() {
 		sigchan := make(chan os.Signal, 10)
@@ -221,7 +223,11 @@ func main() {
 			case <-done:
 				return
 			case _ = <-ticker.C:
-				setPlayState(bridgeIPAddress, username, mpdIPAddress, dayStart, dayEnd, loc, volume)
+				if err = setPlayState(
+					bridgeIPAddress, username, mpdIPAddress, dayStart, dayEnd, loc, volume,
+				); err != nil {
+					log.Fatalln("could not set play state", err)
+				}
 			}
 		}
 	}()
