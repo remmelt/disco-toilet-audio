@@ -8,7 +8,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o main
 
 FROM alpine:latest
 
-RUN apk add -Uu --no-cache --purge mpc ca-certificates tzdata \
+RUN apk add -Uu --no-cache --purge ca-certificates tzdata \
     && rm -rf /var/cache/apk/* /tmp/*
 
 WORKDIR /project

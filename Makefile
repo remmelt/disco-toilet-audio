@@ -4,9 +4,8 @@ img := "remmelt/disco-toilet-audio:latest"
 run:
 	@VOLUME=2 \
     HUE_USERNAME=qz4MvxEkwXmyJrVLkncH5arHKfBux0-keoOf4l9A \
-    HUE_BRIDGE_IP=192.168.178.126 \
+    HUE_BRIDGE_IP=192.168.178.20 \
     MPD_IP=192.168.178.89 \
-    PLAYLIST=WC \
     DAY_START=7:30 \
     DAY_END=22:00 \
 	go run main.go
